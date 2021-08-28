@@ -1,2 +1,1 @@
-# models
-Mathematical Optimization Models
+# Mathematical Optimization Models

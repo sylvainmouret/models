@@ -1,0 +1,120 @@
+! Source of the problem: https://www.linkedin.com/posts/soroudi_python-pyomo-pyomo4all-activity-6836683693688463360-Hhli
+
+model ScatterPointsRectangle
+  uses "mmsystem"
+  uses "mmxprs"
+
+  parameters
+    N = 2000          ! Number of points
+    MATH_MODEL = 'SM' ! 'AS' for Alireza Soroudi's version / 'SM' for Sylvain Mouret's version
+  end-parameters
+
+  setparam("xprs_verbose",true) ! To see Xpress logs
+
+  setrandseed(0)  ! To ensure determinism
+
+  declarations
+    I = 1..N                  ! Set of points
+    I_X: array(I) of integer  ! Points ordered y X coord
+    I_Y: array(I) of integer  ! Points ordered by Y coord
+    X:  array(I) of real      ! X coord of point i
+    Y:  array(I) of real      ! Y coord of point i
+    P:  array(I) of real      ! Value associated to point i
+    xl: array(I) of mpvar     ! Whether point i is above lower X coord of rectangle
+    xu: array(I) of mpvar     ! Whether point i is under upper X coord of rectangle
+    yl: array(I) of mpvar     ! Whether point i is above lower Y coord of rectangle
+    yu: array(I) of mpvar     ! Whether point i is under upper Y coord of rectangle
+    z:  array(I) of mpvar     ! Whether point i is inside rectangle
+    XL, XU, YL, YU: mpvar     ! Used in Alireza Soroudi's version
+  end-declarations
+
+  forall(i in I) do
+    X(i) := random          ! Random within [0, 1]
+    Y(i) := random          ! Random within [0, 1]
+    P(i) := 20*random - 10  ! Random within [-10, 10]
+    xl(i) is_binary
+    xu(i) is_binary
+    yl(i) is_binary
+    yu(i) is_binary
+    z(i) is_binary
+  end-do
+
+  !--- Version by Sylvain Mouret ---!
+  if (MATH_MODEL = 'SM') then
+    qsort(SYS_UP, X, I_X) ! List of points sorted by X coord
+    qsort(SYS_UP, Y, I_Y) ! List of points sorted by Y coord
+    forall(i in I | i > 1) do
+      xl(I_X(i-1)) <= xl(I_X(i))    ! If point i-1 is above lower X coord of rectangle, then so is point i
+      xu(I_X(i))   <= xu(I_X(i-1))  ! If point i   is below upper X coord of rectangle, then so is point i-1
+      yl(I_Y(i-1)) <= yl(I_Y(i))    ! If point i-1 is above lower Y coord of rectangle, then so is point i
+      yu(I_Y(i))   <= yu(I_Y(i-1))  ! If point i   is below upper Y coord of rectangle, then so is point i-1
+    end-do
+  end-if
+  !--- Version by Sylvain Mouret ---!
+
+  !--- Version by Alireza Soroudi ---!
+  if (MATH_MODEL = 'AS') then
+    XL >= 0
+    XU >= 0
+    YL >= 0
+    YU >= 0
+    XL <= 1
+    XU <= 1
+    YL <= 1
+    YU <= 1
+    XL <= XU
+    YL <= YU
+    forall(i in I) do
+      XL - 1 + xl(i) <= X(i)
+      XL     + xl(i) >= X(i)
+      XU + 1 - xu(i) >= X(i)
+      XU     - xu(i) <= X(i)
+      YL - 1 + yl(i) <= Y(i)
+      YL     + yl(i) >= Y(i)
+      YU + 1 - yu(i) >= Y(i)
+      YU     - yu(i) <= Y(i)
+    end-do
+  end-if
+  !--- Version by Alireza Soroudi ---!
+
+  ! Constraints common to both versions
+  forall(i in I | P(i) > 0) do
+    z(i) <= xl(i)
+    z(i) <= xu(i)
+    z(i) <= yl(i)
+    z(i) <= yu(i)
+  end-do
+
+  forall(i in I | P(i) < 0) do
+    z(i) >= xl(i) + xu(i) + yl(i) + yu(i) - 3
+  end-do
+
+  ! Strengthening constraint: each point must be either above lower X coord of rectangle or below upper X coord of rectangle (same of Y coord)
+  ! Improves the bound but does not necessarily help solving faster
+  ! forall(i in I) do
+  !   xl(i) + xu(i) >= 1
+  !   yl(i) + yu(i) >= 1
+  ! end-do
+
+  ! Define objective and solve
+  objective := sum(i in I) P(i) * z(i)
+  maximize(objective)
+
+  ! Solution summary
+  writeln("Objective     = ", getsol(objective))
+  writeln("Lower X coord = ", min(i in I | round(getsol(z(i))) = 1) X(i))
+  writeln("Upper X coord = ", max(i in I | round(getsol(z(i))) = 1) X(i))
+  writeln("Lower Y coord = ", min(i in I | round(getsol(z(i))) = 1) Y(i))
+  writeln("Upper Y coord = ", max(i in I | round(getsol(z(i))) = 1) Y(i))
+
+  ! Solution details
+  ! writeln("Inside rectangle:")
+  ! forall(i in I | round(getsol(z(i))) = 1) do
+  !   writeln("\tPoint ", strfmt(i,-5), " (", strfmt(X(i),6,4), ",", strfmt(Y(i),6,4), ") = ", P(i))
+  ! end-do
+  ! writeln("Outside rectangle:")
+  ! forall(i in I | round(getsol(z(i))) = 0) do
+  !   writeln("\tPoint ", strfmt(i,-5), " (", strfmt(X(i),6,4), ",", strfmt(Y(i),6,4), ") = ", P(i))
+  ! end-do
+
+end-model
